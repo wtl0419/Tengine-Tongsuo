@@ -1,0 +1,19 @@
+# 定义库文件和目标
+LIBHSM=libpiico_cc.a
+HSM_GOAL=../../libhsm.a
+
+# 源文件
+SOURCE[$HSM_GOAL]=hsm_encrypt.c
+
+# 包含目录
+INCLUDE[$HSM_GOAL]=implementations/include
+
+# 编译命令
+CFLAGS += -I$(INCLUDE[$HSM_GOAL])
+
+# 链接命令：在链接时指定库文件
+LIBS[$HSM_GOAL] = $(LIBHSM)
+
+# 编译和链接
+$(HSM_GOAL): $(SOURCE[$HSM_GOAL])
+    $(CC) $(CFLAGS) -o $@ $^ $(LIBS[$HSM_GOAL])
