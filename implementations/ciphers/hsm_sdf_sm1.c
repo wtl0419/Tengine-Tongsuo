@@ -5,7 +5,7 @@
 #include <openssl/err.h> // For OpenSSL error handling
 # include <openssl/types.h>
 #include <openssl/proverr.h>
-#include "hsm_sdf_sm4.h"
+#include "hsm_sdf_sm1.h"
 #include "prov/implementations.h"
 #include "prov/providercommon.h"
 #include "prov/provider_ctx.h"
@@ -88,13 +88,13 @@ static void cleanup(void* hDevice, void* hSession, void* hKey,
 }
 
 // --- 1. newctx 函数实现 (对应 OSSL_FUNC_CIPHER_NEWCTX) ---
-static void* hsm_sm4_cbc_newctx(void* provctx) {
-    SUSHU_HSM_ENCRYPT_CTX* ctx = OPENSSL_zalloc(sizeof(*ctx));
+static void* hsm_sm1_cbc_newctx(void* provctx) {
+    SUSHU_HSM_SM1_CTX* ctx = OPENSSL_zalloc(sizeof(*ctx));
     if (ctx == NULL) {
         ERR_raise(ERR_LIB_PROV, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
-    ossl_cipher_generic_initkey(ctx, SGD_SM4_CBC_KBITS, SGD_SM4_CBC_BLOCK_SIZE, SGD_SM4_CBC_IVLEN, SGD_SM4_CBC, 0, ossl_prov_cipher_hw_sm4_cbc(SGD_SM4_CBC_KBITS), provctx);
+    ossl_cipher_generic_initkey(ctx, SGD_SM1_CBC_KBITS, SGD_SM1_CBC_BLOCK_SIZE, SGD_SM1_CBC_IVLEN, SGD_SM1_CBC, 0, NULL, provctx);
      // Load the dynamic library
     if (!load_sdf_functions()) {
         return 1;
@@ -116,13 +116,13 @@ static void* hsm_sm4_cbc_newctx(void* provctx) {
    
     return ctx;
 }
-static void* hsm_sm4_ecb_newctx(void* provctx) {
-    SUSHU_HSM_ENCRYPT_CTX* ctx = OPENSSL_zalloc(sizeof(*ctx));
+static void* hsm_sm1_ecb_newctx(void* provctx) {
+    SUSHU_HSM_SM1_CTX* ctx = OPENSSL_zalloc(sizeof(*ctx));
     if (ctx == NULL) {
         ERR_raise(ERR_LIB_PROV, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
-    ossl_cipher_generic_initkey(ctx, SGD_SM4_ECB_KBITS, SGD_SM4_ECB_BLOCK_SIZE, SGD_SM4_ECB_IVLEN, SGD_SM4_ECB, 0, ossl_prov_cipher_hw_sm4_ecb(SGD_SM4_ECB_KBITS), provctx);
+    ossl_cipher_generic_initkey(ctx, SGD_SM1_ECB_KBITS, SGD_SM1_ECB_BLOCK_SIZE, SGD_SM1_ECB_IVLEN, SGD_SM1_ECB, 0, NULL, provctx);
     // Load the dynamic library
     if (!load_sdf_functions()) {
         return 1;
@@ -148,7 +148,7 @@ static void* hsm_sm4_ecb_newctx(void* provctx) {
 // --- 2. freectx 函数实现 (对应 OSSL_FUNC_CIPHER_FREECTX) ---
 static void hsm_freectx(void* vctx) {
     
-    SUSHU_HSM_ENCRYPT_CTX* ctx = (SUSHU_HSM_ENCRYPT_CTX*)vctx;
+    SUSHU_HSM_SM1_CTX* ctx = (SUSHU_HSM_SM1_CTX*)vctx;
 
     ossl_cipher_generic_reset_ctx((PROV_CIPHER_CTX*)vctx);
     OPENSSL_clear_free(ctx, sizeof(*ctx));
@@ -156,8 +156,8 @@ static void hsm_freectx(void* vctx) {
 // --- 3. dupctx 函数实现 (对应 OSSL_FUNC_CIPHER_DUPCTX) ---
 static void* hsm_dupctx(void* ctx) {
 
-    SUSHU_HSM_ENCRYPT_CTX* in = (SUSHU_HSM_ENCRYPT_CTX*)ctx;
-    SUSHU_HSM_ENCRYPT_CTX* ret;
+    SUSHU_HSM_SM1_CTX* in = (SUSHU_HSM_SM1_CTX*)ctx;
+    SUSHU_HSM_SM1_CTX* ret;
 
     if (!ossl_prov_is_running())
         return NULL;
@@ -199,7 +199,7 @@ static int hsm_dinit(void* vctx, const unsigned char* key, size_t keylen,
 	}
     return 1;
 }
-static int hsm_sm4_cbc_update(void* vctx, unsigned char* out,
+static int hsm_sm1_cbc_update(void* vctx, unsigned char* out,
     int* outl, size_t outsize, const unsigned char* in, int inl)
 {
     PROV_CIPHER_CTX* ctx = (PROV_CIPHER_CTX*)vctx;
@@ -208,14 +208,14 @@ static int hsm_sm4_cbc_update(void* vctx, unsigned char* out,
     if (ctx->enc == 1)
     {
         printf("Starting encryption...\n");
-        ret = pfn_SDF_Encrypt(hSession, hKey, SGD_SM4_CBC, ctx->iv, in, inl, out, outl);
+        ret = pfn_SDF_Encrypt(hSession, hKey, SGD_SM1_CBC, ctx->iv, in, inl, out, outl);
         CHECK_SDF_RET(ret, "SDF_Encrypt");
         printf("Encryption successful. Ciphertext length: %d\n", *outl);
     }
     else if(ctx->enc == 0)
     {
         printf("Starting decryption...\n");
-        ret = pfn_SDF_Decrypt(hSession, hKey, SGD_SM4_CBC, ctx->iv, in, inl, out, outl);
+        ret = pfn_SDF_Decrypt(hSession, hKey, SGD_SM1_CBC, ctx->iv, in, inl, out, outl);
         CHECK_SDF_RET(ret, "SDF_Decrypt");
 
         printf("Decryption successful. Decrypted length: %d\n", *outl);
@@ -228,7 +228,7 @@ static int hsm_sm4_cbc_update(void* vctx, unsigned char* out,
 	success = ret == 0 ? 1 : 0;
     return success;
 }
-static int hsm_sm4_ecb_update(void* vctx, unsigned char* out,
+static int hsm_sm1_ecb_update(void* vctx, unsigned char* out,
     int* outl, size_t outsize, const unsigned char* in, int inl)
 {
     PROV_CIPHER_CTX* ctx = (PROV_CIPHER_CTX*)vctx;
@@ -237,14 +237,14 @@ static int hsm_sm4_ecb_update(void* vctx, unsigned char* out,
     if (ctx->enc == 1)
     {
         printf("Starting encryption...\n");
-        ret = pfn_SDF_Encrypt(hSession, hKey, SGD_SM4_ECB, ctx->iv, in, inl, out, outl);
+        ret = pfn_SDF_Encrypt(hSession, hKey, SGD_SM1_ECB, ctx->iv, in, inl, out, outl);
         CHECK_SDF_RET(ret, "SDF_Encrypt");
         printf("Encryption successful. Ciphertext length: %d\n", *outl);
     }
     else if (ctx->enc == 0)
     {
         printf("Starting decryption...\n");
-        ret = pfn_SDF_Decrypt(hSession, hKey, SGD_SM4_ECB, ctx->iv, in, inl, out, outl);
+        ret = pfn_SDF_Decrypt(hSession, hKey, SGD_SM1_ECB, ctx->iv, in, inl, out, outl);
         CHECK_SDF_RET(ret, "SDF_Decrypt");
 
         printf("Decryption successful. Decrypted length: %d\n", *outl);
@@ -349,13 +349,13 @@ static const OSSL_PARAM* hsm_gettable_ctx_params(void* provctx) {
     };
     return known_gettable_ctx_params;
 }
-const OSSL_DISPATCH ossl_hsm_sm4cbc_functions[] = {
+const OSSL_DISPATCH ossl_hsm_sm1cbc_functions[] = {
     { OSSL_FUNC_CIPHER_ENCRYPT_INIT, (void (*)(void))hsm_einit },
     { OSSL_FUNC_CIPHER_DECRYPT_INIT, (void (*)(void))hsm_dinit },
-    { OSSL_FUNC_CIPHER_UPDATE, (void (*)(void))hsm_sm4_cbc_update },
+    { OSSL_FUNC_CIPHER_UPDATE, (void (*)(void))hsm_sm1_cbc_update },
     { OSSL_FUNC_CIPHER_FINAL, (void (*)(void))hsm_final },
     { OSSL_FUNC_CIPHER_CIPHER, (void (*)(void))ossl_cipher_generic_cipher },
-    { OSSL_FUNC_CIPHER_NEWCTX, (void (*)(void))hsm_sm4_cbc_newctx },
+    { OSSL_FUNC_CIPHER_NEWCTX, (void (*)(void))hsm_sm1_cbc_newctx },
     { OSSL_FUNC_CIPHER_DUPCTX, (void (*)(void))hsm_dupctx },
     { OSSL_FUNC_CIPHER_FREECTX, (void (*)(void))hsm_freectx },
     { OSSL_FUNC_CIPHER_GET_PARAMS,(void (*)(void))hsm_get_params },
@@ -366,10 +366,10 @@ const OSSL_DISPATCH ossl_hsm_sm4cbc_functions[] = {
     { OSSL_FUNC_CIPHER_SETTABLE_CTX_PARAMS, (void (*)(void))ossl_cipher_generic_settable_ctx_params },
     { 0, NULL }
 };
-const OSSL_DISPATCH ossl_hsm_sm4ecb_functions[] = {
+const OSSL_DISPATCH ossl_hsm_sm1ecb_functions[] = {
     { OSSL_FUNC_CIPHER_ENCRYPT_INIT, (void (*)(void))hsm_einit },
     { OSSL_FUNC_CIPHER_DECRYPT_INIT, (void (*)(void))hsm_dinit },
-    { OSSL_FUNC_CIPHER_UPDATE, (void (*)(void))hsm_sm4_ecb_update },
+    { OSSL_FUNC_CIPHER_UPDATE, (void (*)(void))hsm_sm1_ecb_update },
     { OSSL_FUNC_CIPHER_FINAL, (void (*)(void))hsm_final },
     { OSSL_FUNC_CIPHER_CIPHER, (void (*)(void))ossl_cipher_generic_cipher },
     { OSSL_FUNC_CIPHER_NEWCTX, (void (*)(void))hsm_sm4_ecb_newctx },

@@ -7,6 +7,7 @@ $SHA1_GOAL=../../libdefault.a ../../libfips.a
 $SHA2_GOAL=../../libdefault.a ../../libfips.a
 $SHA3_GOAL=../../libdefault.a ../../libfips.a
 $SM3_GOAL=../../libdefault.a
+$HSM_SM3_GOAL=../../libdefault.a
 $MD5_GOAL=../../libdefault.a
 $NULL_GOAL=../../libdefault.a
 
@@ -15,6 +16,8 @@ SOURCE[$COMMON_GOAL]=digestcommon.c
 
 SOURCE[$SHA2_GOAL]=sha2_prov.c
 SOURCE[$SHA3_GOAL]=sha3_prov.c
+
+SOURCE[$HSM_SM3_GOAL]=hsm_sdf_sm3.c
 
 SOURCE[$NULL_GOAL]=null_prov.c
 

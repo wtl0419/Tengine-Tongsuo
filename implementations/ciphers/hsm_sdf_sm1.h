@@ -1,10 +1,12 @@
 #include "prov/ciphercommon.h"
-#include "crypto/sm4.h"
-#include "crypto/sm4_platform.h"
 
-#define SGD_SM4_CBC_KBITS                  128 //密钥长度为128位     
-#define SGD_SM4_CBC_BLOCK_SIZE             128 //SM4分组长度为16字节
-#define SGD_SM4_CBC_IVLEN                  128 //IV长度为16字节
+#define SGD_SM1_CBC_KBITS                  128 //密钥长度为128位     
+#define SGD_SM1_CBC_BLOCK_SIZE             128 //SM4分组长度为16字节
+#define SGD_SM1_CBC_IVLEN                  128 //IV长度为16字节
+
+#define SGD_SM1_ECB_KBITS                  128 //密钥长度为128位     
+#define SGD_SM1_ECB_BLOCK_SIZE             128 //SM4分组长度为16字节
+#define SGD_SM1_ECB_IVLEN                  128 //IV长度为16字节
 
 //SDF函数指针类型
 typedef int (*SDF_OpenDevice_fn)(void** phDeviceHandle);
@@ -20,10 +22,5 @@ typedef int (*SDF_Decrypt_fn)(void* hSessionHandle, void* hKeyHandle, unsigned i
 
 typedef struct sushu_hsm_encrypt_ctx_st {
     PROV_CIPHER_CTX base;
-    union {
-        OSSL_UNION_ALIGN;
-        SM4_KEY ks;
-    } ks;
-} SUSHU_HSM_ENCRYPT_CTX;
+} SUSHU_HSM_SM1_CTX;
 
-const PROV_CIPHER_HW* ossl_prov_cipher_hw_sm4_cbc(size_t keybits);

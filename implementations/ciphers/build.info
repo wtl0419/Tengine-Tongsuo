@@ -21,7 +21,6 @@ $SIV_GOAL=../../libdefault.a
 $ZUC_GOAL=../../libdefault.a
 
 $HSM_GOAL=../../libdefault.a
-LIBHSM=./libpiico_cc.a
 
 # This source is common building blocks for all ciphers in all our providers.
 SOURCE[$COMMON_GOAL]=\
@@ -37,8 +36,8 @@ SOURCE[$NULL_GOAL]=\
         cipher_null.c
 
 SOURCE[$HSM_GOAL]=\
-        hsm_sdf_encrypt.c
-		LIBS[$HSM_GOAL]=$(LIBHSM)
+        hsm_sdf_sm4.c
+		
 SOURCE[$AES_GOAL]=\
         cipher_aes.c cipher_aes_hw.c \
         cipher_aes_xts.c cipher_aes_xts_hw.c \

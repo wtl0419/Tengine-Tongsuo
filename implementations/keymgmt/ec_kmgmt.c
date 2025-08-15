@@ -25,8 +25,12 @@
 #include "prov/implementations.h"
 #include "prov/providercommon.h"
 #include "prov/provider_ctx.h"
+#include "prov/piico_define.h"
 #include "internal/param_build_set.h"
-
+#include <dlfcn.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #ifndef FIPS_MODULE
 # ifndef OPENSSL_NO_SM2
 #  include "crypto/sm2.h"
@@ -68,7 +72,18 @@ static OSSL_FUNC_keymgmt_query_operation_name_fn sm2_query_operation_name;
 static OSSL_FUNC_keymgmt_validate_fn sm2_validate;
 # endif
 #endif
+static OSSL_FUNC_keymgmt_new_fn hsm_sm2_newdata;
+static OSSL_FUNC_keymgmt_gen_init_fn hsm_sm2_gen_init;
+static OSSL_FUNC_keymgmt_gen_fn hsm_sm2_gen;
+static OSSL_FUNC_keymgmt_get_params_fn hsm_sm2_get_params;
+static OSSL_FUNC_keymgmt_gettable_params_fn hsm_sm2_gettable_params;
+static OSSL_FUNC_keymgmt_settable_params_fn hsm_sm2_settable_params;
+static OSSL_FUNC_keymgmt_import_fn hsm_sm2_import;
+static OSSL_FUNC_keymgmt_query_operation_name_fn hsm_sm2_query_operation_name;
+static OSSL_FUNC_keymgmt_validate_fn hsm_sm2_validate;
 
+
+#define HSM_SM2_SIZE 128
 #define EC_DEFAULT_MD "SHA256"
 #define EC_POSSIBLE_SELECTIONS                                                 \
     (OSSL_KEYMGMT_SELECT_KEYPAIR | OSSL_KEYMGMT_SELECT_ALL_PARAMETERS)
@@ -77,6 +92,8 @@ static OSSL_FUNC_keymgmt_validate_fn sm2_validate;
 static
 const char *ec_query_operation_name(int operation_id)
 {
+    printf("ec_query_operation_name called with operation_id %d\n",
+		operation_id);
     switch (operation_id) {
     case OSSL_OP_KEYEXCH:
         return "ECDH";
@@ -91,6 +108,7 @@ const char *ec_query_operation_name(int operation_id)
 static
 const char *sm2_query_operation_name(int operation_id)
 {
+    printf("entry sm2 query operation_name\n");
     switch (operation_id) {
     case OSSL_OP_KEYEXCH:
         return "SM2DH";
@@ -114,6 +132,8 @@ int key_to_params(const EC_KEY *eckey, OSSL_PARAM_BLD *tmpl,
                   OSSL_PARAM params[], int include_private,
                   unsigned char **pub_key)
 {
+    printf("key_to_params called with eckey %p, tmpl %p, params %p, include_private %d, pub_key %p\n",
+		eckey, tmpl, params, include_private, pub_key);
     BIGNUM *x = NULL, *y = NULL;
     const BIGNUM *priv_key = NULL;
     const EC_POINT *pub_point = NULL;
@@ -260,7 +280,7 @@ int otherparams_to_params(const EC_KEY *ec, OSSL_PARAM_BLD *tmpl,
             && !ossl_param_build_set_int(tmpl, params,
                                          OSSL_PKEY_PARAM_EC_INCLUDE_PUBLIC, 0))
         return 0;
-
+    printf("entry otherparams_to_params\n");
     ecdh_cofactor_mode =
         (EC_KEY_get_flags(ec) & EC_FLAG_COFACTOR_ECDH) ? 1 : 0;
     return ossl_param_build_set_int(tmpl, params,
@@ -271,6 +291,7 @@ int otherparams_to_params(const EC_KEY *ec, OSSL_PARAM_BLD *tmpl,
 static
 void *ec_newdata(void *provctx)
 {
+	printf("ec_newdata called with provctx %p\n", provctx);
     if (!ossl_prov_is_running())
         return NULL;
     return EC_KEY_new_ex(PROV_LIBCTX_OF(provctx), NULL);
@@ -281,6 +302,7 @@ void *ec_newdata(void *provctx)
 static
 void *sm2_newdata(void *provctx)
 {
+	printf("sm2_newdata called with provctx %p\n", provctx);
     if (!ossl_prov_is_running())
         return NULL;
     return EC_KEY_new_by_curve_name_ex(PROV_LIBCTX_OF(provctx), NULL, NID_sm2);
@@ -291,12 +313,14 @@ void *sm2_newdata(void *provctx)
 static
 void ec_freedata(void *keydata)
 {
+	printf("ec_freedata called with keydata %p\n", keydata);
     EC_KEY_free(keydata);
 }
 
 static
 int ec_has(const void *keydata, int selection)
 {
+	printf("ec_has called with keydata %p, selection %d\n", keydata, selection);
     const EC_KEY *ec = keydata;
     int ok = 1;
 
@@ -327,7 +351,7 @@ static int ec_match(const void *keydata1, const void *keydata2, int selection)
     const EC_GROUP *group_b = EC_KEY_get0_group(ec2);
     BN_CTX *ctx = NULL;
     int ok = 1;
-
+    printf("entry ec_match\n");
     if (!ossl_prov_is_running())
         return 0;
 
@@ -369,7 +393,7 @@ static int ec_match(const void *keydata1, const void *keydata2, int selection)
 static int common_check_sm2(const EC_KEY *ec, int sm2_wanted)
 {
     const EC_GROUP *ecg = NULL;
-
+	printf("common_check_sm2 called with ec %p, sm2_wanted %d\n", ec, sm2_wanted);
     /*
      * sm2_wanted: import the keys or domparams only on SM2 Curve
      * !sm2_wanted: import the keys or domparams only not on SM2 Curve
@@ -386,7 +410,7 @@ int common_import(void *keydata, int selection, const OSSL_PARAM params[],
 {
     EC_KEY *ec = keydata;
     int ok = 1;
-
+    printf("entry common_import\n");
     if (!ossl_prov_is_running() || ec == NULL)
         return 0;
 
@@ -426,6 +450,7 @@ int common_import(void *keydata, int selection, const OSSL_PARAM params[],
 static
 int ec_import(void *keydata, int selection, const OSSL_PARAM params[])
 {
+	printf("entry ec_import\n");
     return common_import(keydata, selection, params, 0);
 }
 
@@ -434,6 +459,7 @@ int ec_import(void *keydata, int selection, const OSSL_PARAM params[])
 static
 int sm2_import(void *keydata, int selection, const OSSL_PARAM params[])
 {
+	printf("entry sm2_import\n");
     return common_import(keydata, selection, params, 1);
 }
 # endif
@@ -443,6 +469,7 @@ static
 int ec_export(void *keydata, int selection, OSSL_CALLBACK *param_cb,
               void *cbarg)
 {
+	printf("entry ec_export\n");
     EC_KEY *ec = keydata;
     OSSL_PARAM_BLD *tmpl = NULL;
     OSSL_PARAM *params = NULL;
@@ -546,7 +573,7 @@ static ossl_inline
 const OSSL_PARAM *ec_imexport_types(int selection)
 {
     int type_select = 0;
-
+	printf("ec_imexport_types called with selection %d\n", selection);
     if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)
         type_select += 1;
     if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0)
@@ -561,12 +588,14 @@ const OSSL_PARAM *ec_imexport_types(int selection)
 static
 const OSSL_PARAM *ec_import_types(int selection)
 {
+	printf("ec_import_types called with selection %d\n", selection);
     return ec_imexport_types(selection);
 }
 
 static
 const OSSL_PARAM *ec_export_types(int selection)
 {
+	printf("ec_export_types called with selection %d\n", selection);
     return ec_imexport_types(selection);
 }
 
@@ -580,7 +609,7 @@ static int ec_get_ecm_params(const EC_GROUP *group, OSSL_PARAM params[])
     int basis_nid;
     const char *basis_name = NULL;
     int fid = EC_GROUP_get_field_type(group);
-
+	printf("entry ec_get_ecm_params\n");
     if (fid != NID_X9_62_characteristic_two_field)
         return 1;
 
@@ -624,6 +653,7 @@ err:
 static
 int common_get_params(void *key, OSSL_PARAM params[], int sm2)
 {
+	printf("common_get_params called with key %p, params %p, sm2 %d\n", key, params, sm2);
     int ret = 0;
     EC_KEY *eck = key;
     const EC_GROUP *ecg = NULL;
@@ -744,10 +774,135 @@ err:
     BN_CTX_free(bnctx);
     return ret;
 }
+static
+int hsm_get_params(void* key, OSSL_PARAM params[], int sm2)
+{
+    printf("common_get_params called with key %p, params %p, sm2 %d\n", key, params, sm2);
+    int ret = 0;
+    EC_KEY* eck = key;
+    const EC_GROUP* ecg = NULL;
+    OSSL_PARAM* p;
+    unsigned char* pub_key = NULL, * genbuf = NULL;
+    OSSL_LIB_CTX* libctx;
+    const char* propq;
+    BN_CTX* bnctx = NULL;
 
+    ecg = EC_KEY_get0_group(eck);
+    if (ecg == NULL)
+        return 0;
+
+    libctx = ossl_ec_key_get_libctx(eck);
+    propq = ossl_ec_key_get0_propq(eck);
+
+    bnctx = BN_CTX_new_ex(libctx);
+    if (bnctx == NULL)
+        return 0;
+    BN_CTX_start(bnctx);
+
+    if ((p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_MAX_SIZE)) != NULL
+        && !OSSL_PARAM_set_int(p, HSM_SM2_SIZE))
+        goto err;
+    if ((p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_BITS)) != NULL
+        && !OSSL_PARAM_set_int(p, EC_GROUP_order_bits(ecg)))
+        goto err;
+    if ((p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_SECURITY_BITS)) != NULL) {
+        int ecbits, sec_bits;
+
+        ecbits = EC_GROUP_order_bits(ecg);
+
+        /*
+         * The following estimates are based on the values published
+         * in Table 2 of "NIST Special Publication 800-57 Part 1 Revision 4"
+         * at http://dx.doi.org/10.6028/NIST.SP.800-57pt1r4 .
+         *
+         * Note that the above reference explicitly categorizes algorithms in a
+         * discrete set of values {80, 112, 128, 192, 256}, and that it is
+         * relevant only for NIST approved Elliptic Curves, while OpenSSL
+         * applies the same logic also to other curves.
+         *
+         * Classifications produced by other standardazing bodies might differ,
+         * so the results provided for "bits of security" by this provider are
+         * to be considered merely indicative, and it is the users'
+         * responsibility to compare these values against the normative
+         * references that may be relevant for their intent and purposes.
+         */
+        if (ecbits >= 512)
+            sec_bits = 256;
+        else if (ecbits >= 384)
+            sec_bits = 192;
+        else if (ecbits >= 256)
+            sec_bits = 128;
+        else if (ecbits >= 224)
+            sec_bits = 112;
+        else if (ecbits >= 160)
+            sec_bits = 80;
+        else
+            sec_bits = ecbits / 2;
+
+        if (!OSSL_PARAM_set_int(p, sec_bits))
+            goto err;
+    }
+
+    if ((p = OSSL_PARAM_locate(params,
+        OSSL_PKEY_PARAM_EC_DECODED_FROM_EXPLICIT_PARAMS))
+        != NULL) {
+        int explicitparams = EC_KEY_decoded_from_explicit_params(eck);
+
+        if (explicitparams < 0
+            || !OSSL_PARAM_set_int(p, explicitparams))
+            goto err;
+    }
+
+    if (!sm2) {
+        if ((p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_DEFAULT_DIGEST)) != NULL
+            && !OSSL_PARAM_set_utf8_string(p, EC_DEFAULT_MD))
+            goto err;
+    }
+    else {
+        if ((p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_DEFAULT_DIGEST)) != NULL
+            && !OSSL_PARAM_set_utf8_string(p, SM2_DEFAULT_MD))
+            goto err;
+    }
+
+    /* SM2 doesn't support this PARAM */
+    if (!sm2) {
+        p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_USE_COFACTOR_ECDH);
+        if (p != NULL) {
+            int ecdh_cofactor_mode = 0;
+
+            ecdh_cofactor_mode =
+                (EC_KEY_get_flags(eck) & EC_FLAG_COFACTOR_ECDH) ? 1 : 0;
+
+            if (!OSSL_PARAM_set_int(p, ecdh_cofactor_mode))
+                goto err;
+        }
+    }
+    if ((p = OSSL_PARAM_locate(params,
+        OSSL_PKEY_PARAM_ENCODED_PUBLIC_KEY)) != NULL) {
+        p->return_size = EC_POINT_point2oct(EC_KEY_get0_group(key),
+            EC_KEY_get0_public_key(key),
+            POINT_CONVERSION_UNCOMPRESSED,
+            p->data, p->return_size, bnctx);
+        if (p->return_size == 0)
+            goto err;
+    }
+
+    ret = ec_get_ecm_params(ecg, params)
+        && ossl_ec_group_todata(ecg, NULL, params, libctx, propq, bnctx,
+            &genbuf)
+        && key_to_params(eck, NULL, params, 1, &pub_key)
+        && otherparams_to_params(eck, NULL, params);
+err:
+    OPENSSL_free(genbuf);
+    OPENSSL_free(pub_key);
+    BN_CTX_end(bnctx);
+    BN_CTX_free(bnctx);
+    return ret;
+}
 static
 int ec_get_params(void *key, OSSL_PARAM params[])
 {
+    printf("entry ec_get_params\n");
     return common_get_params(key, params, 0);
 }
 
@@ -783,6 +938,7 @@ static const OSSL_PARAM ec_known_gettable_params[] = {
 static
 const OSSL_PARAM *ec_gettable_params(void *provctx)
 {
+	printf("ec_gettable_params called with provctx %p\n", provctx);
     return ec_known_gettable_params;
 }
 
@@ -800,6 +956,7 @@ static const OSSL_PARAM ec_known_settable_params[] = {
 static
 const OSSL_PARAM *ec_settable_params(void *provctx)
 {
+	printf("ec_settable_params called with provctx %p\n", provctx);
     return ec_known_settable_params;
 }
 
@@ -808,7 +965,7 @@ int ec_set_params(void *key, const OSSL_PARAM params[])
 {
     EC_KEY *eck = key;
     const OSSL_PARAM *p;
-
+	printf("entry ec_set_params\n");
     if (key == NULL)
         return 0;
     if (params == NULL)
@@ -840,6 +997,7 @@ int ec_set_params(void *key, const OSSL_PARAM params[])
 static
 int sm2_get_params(void *key, OSSL_PARAM params[])
 {
+	printf("entry sm2_get_params\n");
     return common_get_params(key, params, 1);
 }
 
@@ -861,6 +1019,7 @@ static const OSSL_PARAM sm2_known_gettable_params[] = {
 static
 const OSSL_PARAM *sm2_gettable_params(ossl_unused void *provctx)
 {
+	printf("sm2_gettable_params called with provctx %p\n", provctx);
     return sm2_known_gettable_params;
 }
 
@@ -872,6 +1031,7 @@ static const OSSL_PARAM sm2_known_settable_params[] = {
 static
 const OSSL_PARAM *sm2_settable_params(ossl_unused void *provctx)
 {
+	printf("sm2_settable_params called with provctx %p\n", provctx);
     return sm2_known_settable_params;
 }
 
@@ -881,7 +1041,7 @@ int sm2_validate(const void *keydata, int selection, int checktype)
     const EC_KEY *eck = keydata;
     int ok = 1;
     BN_CTX *ctx = NULL;
-
+	printf("entry sm2_validate\n");
     if (!ossl_prov_is_running())
         return 0;
 
@@ -920,7 +1080,7 @@ int ec_validate(const void *keydata, int selection, int checktype)
     const EC_KEY *eck = keydata;
     int ok = 1;
     BN_CTX *ctx = NULL;
-
+	printf("entry ec_validate\n");
     if (!ossl_prov_is_running())
         return 0;
 
@@ -978,7 +1138,7 @@ static void *ec_gen_init(void *provctx, int selection,
 {
     OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);
     struct ec_gen_ctx *gctx = NULL;
-
+	printf("ec_gen_init called with provctx %p, selection %d\n", provctx, selection);
     if (!ossl_prov_is_running() || (selection & (EC_POSSIBLE_SELECTIONS)) == 0)
         return NULL;
 
@@ -1000,7 +1160,7 @@ static void *sm2_gen_init(void *provctx, int selection,
                          const OSSL_PARAM params[])
 {
     struct ec_gen_ctx *gctx = ec_gen_init(provctx, selection, params);
-
+	printf("sm2_gen_init called with provctx %p, selection %d\n", provctx, selection);
     if (gctx != NULL) {
         if (gctx->group_name != NULL)
             return gctx;
@@ -1018,7 +1178,7 @@ static int ec_gen_set_group(void *genctx, const EC_GROUP *src)
 {
     struct ec_gen_ctx *gctx = genctx;
     EC_GROUP *group;
-
+	printf("entry ec_gen_set_group\n");
     group = EC_GROUP_dup(src);
     if (group == NULL) {
         ERR_raise(ERR_LIB_PROV, PROV_R_INVALID_CURVE);
@@ -1034,7 +1194,7 @@ static int ec_gen_set_template(void *genctx, void *templ)
     struct ec_gen_ctx *gctx = genctx;
     EC_KEY *ec = templ;
     const EC_GROUP *ec_group;
-
+	printf("ec_gen_set_template called with genctx %p, templ %p\n", genctx, templ);
     if (!ossl_prov_is_running() || gctx == NULL || ec == NULL)
         return 0;
     if ((ec_group = EC_KEY_get0_group(ec)) == NULL)
@@ -1116,7 +1276,7 @@ static int ec_gen_set_group_from_params(struct ec_gen_ctx *gctx)
     OSSL_PARAM_BLD *bld;
     OSSL_PARAM *params = NULL;
     EC_GROUP *group = NULL;
-
+	printf("entry ec_gen_set_group_from_params\n");
     bld = OSSL_PARAM_BLD_new();
     if (bld == NULL)
         return 0;
@@ -1215,6 +1375,7 @@ static int ec_gen_assign_group(EC_KEY *ec, EC_GROUP *group)
         ERR_raise(ERR_LIB_PROV, PROV_R_NO_PARAMETERS_SET);
         return 0;
     }
+	printf("entry ec_gen_assign_group\n");
     return EC_KEY_set_group(ec, group) > 0;
 }
 
@@ -1226,7 +1387,7 @@ static void *ec_gen(void *genctx, OSSL_CALLBACK *osslcb, void *cbarg)
     struct ec_gen_ctx *gctx = genctx;
     EC_KEY *ec = NULL;
     int ret = 0;
-
+	printf("entry ec_gen\n");
     if (!ossl_prov_is_running()
         || gctx == NULL
         || (ec = EC_KEY_new_ex(gctx->libctx, NULL)) == NULL)
@@ -1282,7 +1443,7 @@ static void *sm2_gen(void *genctx, OSSL_CALLBACK *osslcb, void *cbarg)
     struct ec_gen_ctx *gctx = genctx;
     EC_KEY *ec = NULL;
     int ret = 1;
-
+	printf("entry sm2_gen\n");
     if (gctx == NULL
         || (ec = EC_KEY_new_ex(gctx->libctx, NULL)) == NULL)
         return NULL;
@@ -1330,7 +1491,7 @@ static void ec_gen_cleanup(void *genctx)
 
     if (gctx == NULL)
         return;
-
+	printf("entry ec_gen_cleanup\n");
     EC_GROUP_free(gctx->gen_group);
     BN_free(gctx->p);
     BN_free(gctx->a);
@@ -1350,7 +1511,7 @@ static void *common_load(const void *reference, size_t reference_sz,
                          int sm2_wanted)
 {
     EC_KEY *ec = NULL;
-
+    printf("entry common_load\n");
     if (ossl_prov_is_running() && reference_sz == sizeof(ec)) {
         /* The contents of the reference is the address to our object */
         ec = *(EC_KEY **)reference;
@@ -1367,6 +1528,7 @@ static void *common_load(const void *reference, size_t reference_sz,
 
 static void *ec_load(const void *reference, size_t reference_sz)
 {
+	printf("entry ec_load\n");
     return common_load(reference, reference_sz, 0);
 }
 
@@ -1374,6 +1536,7 @@ static void *ec_load(const void *reference, size_t reference_sz)
 # ifndef OPENSSL_NO_SM2
 static void *sm2_load(const void *reference, size_t reference_sz)
 {
+	printf("entry sm2_load\n");
     return common_load(reference, reference_sz, 1);
 }
 # endif
@@ -1383,6 +1546,7 @@ static void *ec_dup(const void *keydata_from, int selection)
 {
     if (ossl_prov_is_running())
         return ossl_ec_key_dup(keydata_from, selection);
+	printf("entry ec_dup\n");
     return NULL;
 }
 
@@ -1446,4 +1610,306 @@ const OSSL_DISPATCH ossl_sm2_keymgmt_functions[] = {
     { 0, NULL }
 };
 # endif
+//hsm_sm2
+typedef int (*SDF_OpenDevice_fn)(void** phDeviceHandle);
+typedef int (*SDF_CloseDevice_fn)(void* hDeviceHandle);
+typedef int (*SDF_OpenSession_fn)(void* hDeviceHandle, void** phSessionHandle);
+typedef int (*SDF_CloseSession_fn)(void* hSessionHandle);
+typedef int (*SDF_GenerateKeyPair_ECC_fn)(void* hSessionHandle, unsigned int uiAlgID, unsigned int uiKeyBits, void* pucPublicKey, void* pucPrivateKey);
+typedef int (*SDF_ExternalEncrypt_ECC_fn)(void* hSessionHandle, unsigned int uiAlgID, void* pucPublicKey, unsigned char* pucData, unsigned int uiDataLength, void* pucEncData);
+typedef int (*SDF_ExternalDecrypt_ECC_fn)(void* hSessionHandle, unsigned int uiAlgID, void* pucPrivateKey, void* pucEncData, unsigned char* pucData, unsigned int* puiDataLength);
+typedef int (*SDF_GenerateRandom_fn)(void* hSessionHandle, unsigned int uiLength, unsigned char* pucRandom);
+typedef int (*SDF_HashInit_fn)(void* hSessionHandle, unsigned int uiAlgID, void* pucPublicKey, unsigned char* pucID, unsigned int uiIDLength);
+typedef int (*SDF_HashUpdate_fn)(void* hSessionHandle, unsigned char* pucData, unsigned int uiDataLength);
+typedef int (*SDF_HashFinal_fn)(void* hSessionHandle, unsigned char* pucHash, unsigned int* puiHashLength);
+
+
+// 全局函数指针和库句柄
+static void* h_lib = NULL;
+static SDF_OpenDevice_fn pfn_SDF_OpenDevice = NULL;
+static SDF_CloseDevice_fn pfn_SDF_CloseDevice = NULL;
+static SDF_OpenSession_fn pfn_SDF_OpenSession = NULL;
+static SDF_CloseSession_fn pfn_SDF_CloseSession = NULL;
+static SDF_GenerateKeyPair_ECC_fn pfn_SDF_GenerateKeyPair_ECC = NULL;
+static SDF_ExternalEncrypt_ECC_fn pfn_SDF_ExternalEncrypt_ECC = NULL;
+static SDF_ExternalDecrypt_ECC_fn pfn_SDF_ExternalDecrypt_ECC = NULL;
+static SDF_GenerateRandom_fn pfn_SDF_GenerateRandom = NULL;
+static SDF_HashInit_fn pfn_SDF_HashInit = NULL;
+static SDF_HashUpdate_fn pfn_SDF_HashUpdate = NULL;
+static SDF_HashFinal_fn pfn_SDF_HashFinal = NULL;
+
+#define SR_SUCCESSFULLY 0
+static int load_sm2_sdf_functions() {
+    if (h_lib != NULL) return 1;
+
+    h_lib = dlopen("libpiico_cc.so", RTLD_LAZY);
+    if (h_lib == NULL) {
+        fprintf(stderr, "Error loading libpiico_cc.so: %s\n", dlerror());
+        return 0;
+    }
+
+    pfn_SDF_OpenDevice = (SDF_OpenDevice_fn)dlsym(h_lib, "SDF_OpenDevice");
+    pfn_SDF_CloseDevice = (SDF_CloseDevice_fn)dlsym(h_lib, "SDF_CloseDevice");
+    pfn_SDF_OpenSession = (SDF_OpenSession_fn)dlsym(h_lib, "SDF_OpenSession");
+    pfn_SDF_CloseSession = (SDF_CloseSession_fn)dlsym(h_lib, "SDF_CloseSession");
+    pfn_SDF_GenerateKeyPair_ECC = (SDF_GenerateKeyPair_ECC_fn)dlsym(h_lib, "SDF_GenerateKeyPair_ECC");
+    pfn_SDF_ExternalEncrypt_ECC = (SDF_ExternalEncrypt_ECC_fn)dlsym(h_lib, "SDF_ExternalEncrypt_ECC");
+    pfn_SDF_ExternalDecrypt_ECC = (SDF_ExternalDecrypt_ECC_fn)dlsym(h_lib, "SDF_ExternalDecrypt_ECC");
+    pfn_SDF_GenerateRandom = (SDF_GenerateRandom_fn)dlsym(h_lib, "SDF_GenerateRandom");
+    pfn_SDF_HashInit = (SDF_HashInit_fn)dlsym(h_lib, "SDF_HashInit");
+    pfn_SDF_HashUpdate = (SDF_HashUpdate_fn)dlsym(h_lib, "SDF_HashUpdate");
+    pfn_SDF_HashFinal = (SDF_HashFinal_fn)dlsym(h_lib, "SDF_HashFinal");
+
+    // 检查所有必要的函数是否都已找到
+    if (!pfn_SDF_OpenDevice || !pfn_SDF_CloseDevice || !pfn_SDF_OpenSession ||
+        !pfn_SDF_CloseSession || !pfn_SDF_GenerateKeyPair_ECC || !pfn_SDF_ExternalEncrypt_ECC ||
+        !pfn_SDF_ExternalDecrypt_ECC || !pfn_SDF_GenerateRandom || !pfn_SDF_HashInit ||
+        !pfn_SDF_HashUpdate || !pfn_SDF_HashFinal) {
+
+        fprintf(stderr, "Error: One or more required SDF functions not found in libpiico_cc.so: %s\n", dlerror());
+        dlclose(h_lib);
+        h_lib = NULL;
+        return 0;
+    }
+
+    return 1;
+}
+
+static void unload_sm2_sdf_functions() {
+    if (h_lib != NULL) {
+        dlclose(h_lib);
+        h_lib = NULL;
+    }
+}
+static
+void* hsm_sm2_newdata(void* provctx)
+{
+    printf("entry hsm_sm2_newdata called with provctx %p\n", provctx);
+    if (!ossl_prov_is_running())
+        return NULL;
+    return EC_KEY_new_by_curve_name_ex(PROV_LIBCTX_OF(provctx), NULL, NID_sm2);
+}
+static void* hsm_sm2_gen_init(void* provctx, int selection,
+    const OSSL_PARAM params[])
+{
+    printf("entry hsm_sm2_gen_init called with provctx %p, selection %d\n", provctx, selection);
+    struct ec_gen_ctx* gctx = ec_gen_init(provctx, selection, params);
+    
+    if (gctx != NULL) {
+        if (gctx->group_name != NULL)
+            return gctx;
+        if ((gctx->group_name = OPENSSL_strdup("sm2")) != NULL)
+            return gctx;
+        ERR_raise(ERR_LIB_PROV, ERR_R_MALLOC_FAILURE);
+        ec_gen_cleanup(gctx);
+    }
+    return NULL;
+}
+static void print_hex(const char* label, const unsigned char* data, int len) {
+    printf("%s: ", label);
+    for (int i = 0; i < len; i++) {
+        printf("%02x", data[i]);
+    }
+    printf("\n");
+}
+static void* hsm_sm2_gen(void* genctx, OSSL_CALLBACK* osslcb, void* cbarg)
+{
+    struct ec_gen_ctx* gctx = genctx;
+    EC_KEY* ec = NULL;
+    int ret = 1;
+    void* hDevice = NULL;
+    void* hSession = NULL;
+    ECCrefPublicKey pk;
+    ECCrefPrivateKey vk;
+    if (gctx == NULL
+        || (ec = EC_KEY_new_ex(gctx->libctx, NULL)) == NULL)
+        return NULL;
+
+    if (gctx->gen_group == NULL) {
+        if (!ec_gen_set_group_from_params(gctx))
+            goto err;
+    }
+    else {
+        if (gctx->encoding) {
+            int flags = ossl_ec_encoding_name2id(gctx->encoding);
+
+            if (flags < 0)
+                goto err;
+            EC_GROUP_set_asn1_flag(gctx->gen_group, flags);
+        }
+        if (gctx->pt_format != NULL) {
+            int format = ossl_ec_pt_format_name2id(gctx->pt_format);
+
+            if (format < 0)
+                goto err;
+            EC_GROUP_set_point_conversion_form(gctx->gen_group, format);
+        }
+    }
+
+    /* We must always assign a group, no matter what */
+    ret = ec_gen_assign_group(ec, gctx->gen_group);
+    if (gctx == NULL || !ossl_prov_is_running() || !load_sm2_sdf_functions()) {
+        return NULL;
+    }
+    printf("entry hsm_sm2_gen\n");
+    // 1. 打开设备和会话
+    if (pfn_SDF_OpenDevice(&hDevice) != SR_SUCCESSFULLY) {
+        //ERR_raise(ERR_LIB_PROV, PROV_R_FAILED_TO_OPEN_DEVICE);
+        goto err;
+    }
+    if (pfn_SDF_OpenSession(hDevice, &hSession) != SR_SUCCESSFULLY) {
+        //ERR_raise(ERR_LIB_PROV, PROV_R_FAILED_TO_OPEN_SESSION);
+        pfn_SDF_CloseDevice(hDevice);
+        goto err;
+    }
+    // 2. 调用 SDF 函数生成 SM2 密钥对
+    ret = pfn_SDF_GenerateKeyPair_ECC(hSession, SGD_SM2_1, 256, &pk, &vk);
+    if (ret != SR_SUCCESSFULLY) {
+        //ERR_raise(ERR_LIB_PROV, PROV_R_KEY_GEN_FAIL);
+        goto err;
+    }
+    // 3. 将SDF公私钥转换为BIGNUM
+    BIGNUM* bn_priv_key = BN_bin2bn(vk.K, sizeof(vk.K), NULL);
+    BIGNUM* bn_pub_x = BN_bin2bn(pk.x, sizeof(pk.x), NULL);
+    BIGNUM* bn_pub_y = BN_bin2bn(pk.y, sizeof(pk.y), NULL);
+    // 4. 将私钥设置到EC_KEY对象中
+    if (bn_priv_key == NULL || !EC_KEY_set_private_key(ec, bn_priv_key)) {
+        goto err;
+    }
+    // 5. 使用EC_KEY对象中的EC_GROUP来创建和设置公钥点 <-- 关键修复点
+    EC_POINT* pub_point = EC_POINT_new(EC_KEY_get0_group(ec));
+    if (pub_point == NULL || !EC_POINT_set_affine_coordinates(EC_KEY_get0_group(ec), pub_point, bn_pub_x, bn_pub_y, NULL)) {
+        goto err;
+    }
+    if (!EC_KEY_set_public_key(ec, pub_point)) {
+        goto err;
+    }
+    // 4. 清理临时 BIGNUM 和 EC_POINT
+    BN_free(bn_priv_key);
+    BN_free(bn_pub_x);
+    BN_free(bn_pub_y);
+    EC_POINT_free(pub_point);
+
+    // 5. 关闭会话和设备
+    pfn_SDF_CloseSession(hSession);
+    pfn_SDF_CloseDevice(hDevice);
+
+    return ec;
+
+err:
+    if (hSession != NULL) pfn_SDF_CloseSession(hSession);
+    if (hDevice != NULL) pfn_SDF_CloseDevice(hDevice);
+    if (ec != NULL) EC_KEY_free(ec);
+    BN_free(bn_priv_key);
+    BN_free(bn_pub_x);
+    BN_free(bn_pub_y);
+    EC_POINT_free(pub_point);
+    return NULL;
+}
+static void* hsm_sm2_load(const void* reference, size_t reference_sz)
+{
+    printf("entry hsm_sm2_load\n");
+    return common_load(reference, reference_sz, 1);
+}
+static
+int hsm_sm2_get_params(void* key, OSSL_PARAM params[])
+{
+    printf("entry hsm_sm2_get_params\n");
+    return common_get_params(key, params, 1);
+}
+static
+const OSSL_PARAM* hsm_sm2_gettable_params(ossl_unused void* provctx)
+{
+    printf("hsm_sm2_gettable_params called with provctx %p\n", provctx);
+    return sm2_known_gettable_params;
+}
+static
+const OSSL_PARAM* hsm_sm2_settable_params(ossl_unused void* provctx)
+{
+    printf("hsm_sm2_settable_params called with provctx %p\n", provctx);
+    return sm2_known_settable_params;
+}
+static
+int hsm_sm2_validate(const void* keydata, int selection, int checktype)
+{
+    const EC_KEY* eck = keydata;
+    int ok = 1;
+    BN_CTX* ctx = NULL;
+    printf("entry hsm_sm2_validate\n");
+    if (!ossl_prov_is_running())
+        return 0;
+
+    if ((selection & EC_POSSIBLE_SELECTIONS) == 0)
+        return 1; /* nothing to validate */
+
+    ctx = BN_CTX_new_ex(ossl_ec_key_get_libctx(eck));
+    if (ctx == NULL)
+        return 0;
+
+    if ((selection & OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS) != 0)
+        ok = ok && EC_GROUP_check(EC_KEY_get0_group(eck), ctx);
+
+    if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0) {
+        if (checktype == OSSL_KEYMGMT_VALIDATE_QUICK_CHECK)
+            ok = ok && ossl_ec_key_public_check_quick(eck, ctx);
+        else
+            ok = ok && ossl_ec_key_public_check(eck, ctx);
+    }
+
+    if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)
+        ok = ok && ossl_sm2_key_private_check(eck);
+
+    if ((selection & OSSL_KEYMGMT_SELECT_KEYPAIR) == OSSL_KEYMGMT_SELECT_KEYPAIR)
+        ok = ok && ossl_ec_key_pairwise_check(eck, ctx);
+
+    BN_CTX_free(ctx);
+    return ok;
+}
+static
+int hsm_sm2_import(void* keydata, int selection, const OSSL_PARAM params[])
+{
+    printf("entry hsm_sm2_import\n");
+    return common_import(keydata, selection, params, 1);
+}
+static
+const char* hsm_sm2_query_operation_name(int operation_id)
+{
+    printf("entry hsm_sm2 query operation_name\n");
+    switch (operation_id) {
+    case OSSL_OP_KEYEXCH:
+        return "SM2DH";
+    case OSSL_OP_SIGNATURE:
+        return "SM2";
+    }
+    return NULL;
+}
+
+const OSSL_DISPATCH ossl_hsm_sm2_keymgmt_functions[] = {
+    { OSSL_FUNC_KEYMGMT_NEW, (void (*)(void))hsm_sm2_newdata },
+    { OSSL_FUNC_KEYMGMT_GEN_INIT, (void (*)(void))hsm_sm2_gen_init },
+    { OSSL_FUNC_KEYMGMT_GEN_SET_TEMPLATE,
+      (void (*)(void))ec_gen_set_template },
+    { OSSL_FUNC_KEYMGMT_GEN_SET_PARAMS, (void (*)(void))ec_gen_set_params },
+    { OSSL_FUNC_KEYMGMT_GEN_SETTABLE_PARAMS,
+      (void (*)(void))ec_gen_settable_params },
+    { OSSL_FUNC_KEYMGMT_GEN, (void (*)(void))hsm_sm2_gen },
+    { OSSL_FUNC_KEYMGMT_GEN_CLEANUP, (void (*)(void))ec_gen_cleanup },
+    { OSSL_FUNC_KEYMGMT_LOAD, (void (*)(void))hsm_sm2_load },
+    { OSSL_FUNC_KEYMGMT_FREE, (void (*)(void))ec_freedata },
+    { OSSL_FUNC_KEYMGMT_GET_PARAMS, (void (*) (void))hsm_sm2_get_params },
+    { OSSL_FUNC_KEYMGMT_GETTABLE_PARAMS, (void (*) (void))hsm_sm2_gettable_params },
+    { OSSL_FUNC_KEYMGMT_SET_PARAMS, (void (*) (void))ec_set_params },
+    { OSSL_FUNC_KEYMGMT_SETTABLE_PARAMS, (void (*) (void))hsm_sm2_settable_params },
+    { OSSL_FUNC_KEYMGMT_HAS, (void (*)(void))ec_has },
+    { OSSL_FUNC_KEYMGMT_MATCH, (void (*)(void))ec_match },
+    { OSSL_FUNC_KEYMGMT_VALIDATE, (void (*)(void))hsm_sm2_validate },
+    { OSSL_FUNC_KEYMGMT_IMPORT, (void (*)(void))hsm_sm2_import },
+    { OSSL_FUNC_KEYMGMT_IMPORT_TYPES, (void (*)(void))ec_import_types },
+    { OSSL_FUNC_KEYMGMT_EXPORT, (void (*)(void))ec_export },
+    { OSSL_FUNC_KEYMGMT_EXPORT_TYPES, (void (*)(void))ec_export_types },
+    { OSSL_FUNC_KEYMGMT_QUERY_OPERATION_NAME,
+      (void (*)(void))hsm_sm2_query_operation_name },
+    { OSSL_FUNC_KEYMGMT_DUP, (void (*)(void))ec_dup },
+    { 0, NULL }
+};
 #endif

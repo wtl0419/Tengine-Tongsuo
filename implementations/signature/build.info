@@ -6,6 +6,7 @@ $EC_GOAL=../../libdefault.a ../../libfips.a
 $MAC_GOAL=../../libdefault.a ../../libfips.a
 $RSA_GOAL=../../libdefault.a ../../libfips.a
 $SM2_GOAL=../../libdefault.a
+$HSM_SM2_GOAL=../../libdefault.a
 
 IF[{- !$disabled{dsa} -}]
   SOURCE[$DSA_GOAL]=dsa_sig.c
@@ -17,6 +18,7 @@ ENDIF
 
 IF[{- !$disabled{sm2} -}]
   SOURCE[$SM2_GOAL]=sm2_sig.c
+  SOURCE[$HSM_SM2_GOAL]=hsm_sm2_sig.c
 ENDIF
 
 SOURCE[$RSA_GOAL]=rsa_sig.c

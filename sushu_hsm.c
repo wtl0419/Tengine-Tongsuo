@@ -14,7 +14,7 @@
 #include "prov/seeding.h"
 #include "internal/nelem.h"
 
-#define ALGC(NAMES, FUNC, CHECK) { { NAMES, "provider=default", FUNC }, CHECK }
+#define ALGC(NAMES, FUNC, CHECK) { { NAMES, "provider=sushuHsm", FUNC }, CHECK }
 #define ALG(NAMES, FUNC) ALGC(NAMES, FUNC, NULL)
 
 static OSSL_FUNC_provider_gettable_params_fn sushu_hsm_gettable_params;
@@ -29,15 +29,55 @@ typedef struct sushu_hsm_prov_ctx_st {
 
 // 前向声明 Provider 提供的算法分发表
 const OSSL_ALGORITHM_CAPABLE sushu_hsm_cipher_functions[] = {
-    ALG(PROV_NAMES_SM4_CBC, ossl_hsm_encrypt_functions),
-    ALG(PROV_NAMES_HSM_SDF_CIPHER, ossl_hsm_encrypt_functions)
+    ALG(PROV_NAMES_SM4_CBC, ossl_hsm_sm4cbc_functions),
+    ALG(PROV_NAMES_SM4_ECB, ossl_hsm_sm4ecb_functions),
+
+
+    { { NULL, NULL, NULL }, NULL }
 }; // 示例：PCIe 加速的对称密码算法
+
+static OSSL_ALGORITHM sushu_hsm_exported_ciphers[OSSL_NELEM(sushu_hsm_cipher_functions)];
+
+
 const OSSL_ALGORITHM sushu_hsm_digest_functions[] = {
 
-#ifndef OPENSSL_NO_SM3
-    { PROV_NAMES_SM3, "provider=sushu_hsm", ossl_sm3_functions },
-#endif /* OPENSSL_NO_SM3 */
+    { PROV_NAMES_SM3, "provider=sushuHsm", ossl_hsm_sm3_functions },
     { NULL, NULL, NULL }
+};
+static const OSSL_ALGORITHM sushu_hsm_asym_cipher[] = {
+
+    { PROV_NAMES_SM2, "provider=sushuHsm", ossl_hsm_sm2_asym_cipher_functions },
+    { NULL, NULL, NULL }
+};
+static const OSSL_ALGORITHM sushu_hsm_keymgmt_functions[] = {
+    { PROV_NAMES_SM2, "provider=sushuHsm", ossl_hsm_sm2_keymgmt_functions, PROV_DESCS_SM2},
+    { NULL, NULL, NULL }
+};
+
+static const OSSL_ALGORITHM sushu_hsm_signature_functions[] = {
+    { PROV_NAMES_SM2, "provider=sushuHsm", ossl_hsm_sm2_signature_functions },
+    { NULL, NULL, NULL }
+};
+static const OSSL_ALGORITHM sushu_hsm_store[] = {
+#define STORE(name, _fips, func_table)                           \
+    { name, "provider=sushuHsm,fips=" _fips, (func_table) },
+
+#include "stores.inc"
+    { NULL, NULL, NULL }
+#undef STORE
+};
+static const OSSL_ALGORITHM sushu_hsm_encoder[] = {
+#define ENCODER_PROVIDER "sushuHsm"
+#include "encoders.inc"
+    { NULL, NULL, NULL }
+#undef ENCODER_PROVIDER
+};
+
+static const OSSL_ALGORITHM sushu_hsm_decoder[] = {
+#define DECODER_PROVIDER "sushuHsm"
+#include "decoders.inc"
+    { NULL, NULL, NULL }
+#undef DECODER_PROVIDER
 };
 static const OSSL_PARAM sushu_hsm_gettable_provider_params[] = {
     OSSL_PARAM_DEFN(OSSL_PROV_PARAM_NAME, OSSL_PARAM_UTF8_PTR, NULL, 0),
@@ -57,7 +97,7 @@ static int sushu_hsm_get_params(void* provctx, OSSL_PARAM params[])
 
     // 获取 Provider 名称
     p = OSSL_PARAM_locate(params, OSSL_PROV_PARAM_NAME);
-    if (p != NULL && !OSSL_PARAM_set_utf8_ptr(p, "OpenSSL sushu hsm Provider"))
+    if (p != NULL && !OSSL_PARAM_set_utf8_ptr(p, "sushuHsm Provider"))
         return 0; // 如果设置失败，返回0表示失败
 
     // 获取 Provider 版本
@@ -105,11 +145,24 @@ static const OSSL_DISPATCH sushu_hsm_provider_dispatch_table[] = {
 // Provider 的查询操作函数 (实现 OSSL_FUNC_PROVIDER_QUERY_OPERATION)
 static const OSSL_ALGORITHM* sushu_hsm_query_operation(void* provctx, int operation_id, int* no_cache) {
     // 根据 operation_id 返回对应的算法列表
+    *no_cache = 0;
     switch (operation_id) {
     case OSSL_OP_CIPHER:
-        return sushu_hsm_cipher_functions; // 返回对称密码算法列表
+        return sushu_hsm_exported_ciphers; // 返回对称密码算法列表
     case OSSL_OP_DIGEST:
         return sushu_hsm_digest_functions; // 返回散列算法列表
+    case OSSL_OP_ASYM_CIPHER:
+        return sushu_hsm_asym_cipher;
+    case OSSL_OP_KEYMGMT:
+        return sushu_hsm_keymgmt_functions;
+    case OSSL_OP_SIGNATURE:
+        return sushu_hsm_signature_functions;
+    //case OSSL_OP_ENCODER:
+    //    return sushu_hsm_encoder;
+    //case OSSL_OP_DECODER:
+    //    return sushu_hsm_decoder;
+    case OSSL_OP_STORE:
+        return sushu_hsm_store;
         // ... 其他操作，如 KDF, RAND 等
     }
     return NULL;
@@ -168,6 +221,6 @@ int ossl_sushu_hsm_provider_init(const OSSL_CORE_HANDLE* handle,
     // }
 
     *out = sushu_hsm_provider_dispatch_table; // 返回Provider的核心功能分发表
-
+    ossl_prov_cache_exported_algorithms(sushu_hsm_cipher_functions, sushu_hsm_exported_ciphers);
     return 1;
 }
