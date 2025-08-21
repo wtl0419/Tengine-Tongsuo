@@ -101,6 +101,7 @@ typedef struct {
     ECCrefPrivateKey ecc_vk;
     void* hDevice;
     void* hSession;
+    void* hHashSession;
 } PROV_SM2_CTX;
 // SDF 函数指针类型定义
 typedef int (*SDF_OpenDevice_fn)(void** phDeviceHandle);
@@ -309,7 +310,10 @@ static int sm2sig_signature_init(void *vpsm2ctx, void *ec,
         pfn_SDF_CloseDevice(ctx->hDevice);
         return 0;
     }
-
+    //if (pfn_SDF_OpenSession(ctx->hDevice, &ctx->hHashSession) != SR_SUCCESSFULLY) {
+    //    pfn_SDF_CloseDevice(ctx->hDevice);
+    //    return 0;
+    //}
     if (!convert_key_to_sdf_format(ctx)) {
         pfn_SDF_CloseSession(ctx->hSession);
         pfn_SDF_CloseDevice(ctx->hDevice);
@@ -429,9 +433,12 @@ static int sm2sig_digest_signverify_init(void *vpsm2ctx, const char *mdname,
     }
     WPACKET_cleanup(&pkt);
 
-    if (!EVP_DigestInit_ex2(ctx->mdctx, ctx->md, params))
-        goto error;
 
+    //if (!EVP_DigestInit_ex2(ctx->mdctx, ctx->md, params))
+    //    goto error;
+    if (pfn_SDF_HashInit(ctx->hSession, SGD_SM3, &ctx->ecc_pk, ctx->id, ctx->id_len) != SR_SUCCESSFULLY) {
+        goto error;
+    }
     ret = 1;
 
  error:
@@ -451,8 +458,11 @@ static int sm2sig_compute_z_digest(PROV_SM2_CTX *ctx)
             /* get hashed prefix 'z' of tbs message */
             || !ossl_sm2_compute_z_digest(z, ctx->md, ctx->id, ctx->id_len,
                                           ctx->ec)
-            || !EVP_DigestUpdate(ctx->mdctx, z, ctx->mdsize))
+            || !EVP_DigestUpdate(ctx->mdctx, z, ctx->mdsize)
+            || pfn_SDF_HashUpdate(ctx->hSession, (unsigned char*)z, ctx->mdsize))
             ret = 0;
+        printf("hsm sm2sig_compute_z_digest with z %p, mdsize %zu, id %p, id_len %zu\n",
+            z, ctx->mdsize, ctx->id, ctx->id_len);
         OPENSSL_free(z);
     }
 
@@ -467,8 +477,8 @@ int sm2sig_digest_signverify_update(void *vpsm2ctx, const unsigned char *data,
     if (psm2ctx == NULL || psm2ctx->mdctx == NULL)
         return 0;
 
-    return sm2sig_compute_z_digest(psm2ctx)
-        && EVP_DigestUpdate(psm2ctx->mdctx, data, datalen);
+    int ret = !pfn_SDF_HashUpdate(psm2ctx->hSession, (unsigned char*)data, datalen);
+    return ret;
 }
 
 int sm2sig_digest_sign_final(void *vpsm2ctx, unsigned char *sig, size_t *siglen,
@@ -477,6 +487,7 @@ int sm2sig_digest_sign_final(void *vpsm2ctx, unsigned char *sig, size_t *siglen,
     PROV_SM2_CTX *psm2ctx = (PROV_SM2_CTX *)vpsm2ctx;
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int dlen = 0;
+    int ret;
     printf("entry hsm sm2sig_digest_sign_final\n");
     if (psm2ctx == NULL || psm2ctx->mdctx == NULL)
         return 0;
@@ -486,8 +497,8 @@ int sm2sig_digest_sign_final(void *vpsm2ctx, unsigned char *sig, size_t *siglen,
      * are ignored. Defer to sm2sig_sign.
      */
     if (sig != NULL) {
-        if (!(sm2sig_compute_z_digest(psm2ctx)
-              && EVP_DigestFinal_ex(psm2ctx->mdctx, digest, &dlen)))
+        ret = pfn_SDF_HashFinal(psm2ctx->hSession, (unsigned char*)digest, &dlen);
+        if (ret != 0)
             return 0;
     }
 
@@ -501,14 +512,10 @@ int sm2sig_digest_verify_final(void *vpsm2ctx, const unsigned char *sig,
     PROV_SM2_CTX *psm2ctx = (PROV_SM2_CTX *)vpsm2ctx;
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int dlen = 0;
+    int ret;
     printf("entry hsm sm2sig_digest_verify_final\n");
-    if (psm2ctx == NULL
-        || psm2ctx->mdctx == NULL
-        || EVP_MD_get_size(psm2ctx->md) > (int)sizeof(digest))
-        return 0;
-
-    if (!(sm2sig_compute_z_digest(psm2ctx)
-          && EVP_DigestFinal_ex(psm2ctx->mdctx, digest, &dlen)))
+    ret = pfn_SDF_HashFinal(psm2ctx->hSession, digest, &dlen);
+    if (ret != 0)
         return 0;
 
     return sm2sig_verify(vpsm2ctx, sig, siglen, digest, (size_t)dlen);
@@ -524,18 +531,22 @@ static void sm2sig_freectx(void *vpsm2ctx)
         EC_KEY_free(ctx->ec);
         OPENSSL_free(ctx);
     }
+	printf("hsm sm2sig_freectx completed\n");
 }
 
 static void *sm2sig_dupctx(void *vpsm2ctx)
 {
     PROV_SM2_CTX *srcctx = (PROV_SM2_CTX *)vpsm2ctx;
     PROV_SM2_CTX *dstctx;
+
 	printf("entry hsm sm2sig_dupctx with vpsm2ctx %p\n", vpsm2ctx);
     dstctx = OPENSSL_zalloc(sizeof(*srcctx));
     if (dstctx == NULL)
         return NULL;
 
     *dstctx = *srcctx;
+    srcctx->hDevice = NULL;
+	srcctx->hSession = NULL;
     dstctx->ec = NULL;
     dstctx->md = NULL;
     dstctx->mdctx = NULL;

@@ -149,7 +149,7 @@ static void* hsm_sm4_ecb_newctx(void* provctx) {
 static void hsm_freectx(void* vctx) {
     
     SUSHU_HSM_ENCRYPT_CTX* ctx = (SUSHU_HSM_ENCRYPT_CTX*)vctx;
-
+	printf("entering hsm_freectx with ctx: %p\n", vctx);
     ossl_cipher_generic_reset_ctx((PROV_CIPHER_CTX*)vctx);
     OPENSSL_clear_free(ctx, sizeof(*ctx));
 }
@@ -161,7 +161,7 @@ static void* hsm_dupctx(void* ctx) {
 
     if (!ossl_prov_is_running())
         return NULL;
-
+	printf("entering hsm_dupctx with ctx: %p\n", ctx);
     ret = OPENSSL_malloc(sizeof(*ret));
     if (ret == NULL) {
         ERR_raise(ERR_LIB_PROV, ERR_R_MALLOC_FAILURE);

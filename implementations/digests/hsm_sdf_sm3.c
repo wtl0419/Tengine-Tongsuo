@@ -26,14 +26,12 @@ typedef int (*SDF_CloseSession_fn)(void* hSessionHandle);
 typedef int (*SDF_HashInit_fn)(void* hSessionHandle, unsigned int uiAlgID, void* pucPublicKey, unsigned char* pucID, unsigned int uiIDLength);
 typedef int (*SDF_HashUpdate_fn)(void* hSessionHandle, unsigned char* pucData, unsigned int uiDataLength);
 typedef int (*SDF_HashFinal_fn)(void* hSessionHandle, unsigned char* pucHash, unsigned int* puiHashLength);
-
 /* HSM SM3 摘要上下文 */
 typedef struct {
-    void* hDevice;
     void* hSession;
     // 由于我们使用硬件，因此不需要软件的 SM3_CTX
 } HSM_SM3_DIGEST_CTX;
-
+void* hDevice;
 /* 动态库和 SDF 函数的全局变量 */
 static void* h_lib = NULL;
 static SDF_OpenDevice_fn pfn_SDF_OpenDevice = NULL;
@@ -82,10 +80,10 @@ static void unload_sdf_functions() {
 /* -------------------- 提供程序函数定义 -------------------- */
 
 /* newctx - 分配并返回一个新的、未初始化的上下文。 */
-static void* hsm_sm3_newctx(void* prov_ctx) {
-    if (!ossl_prov_is_running()) return NULL;
+static void* hsm_sm3_newctx(void* provctx) {
     HSM_SM3_DIGEST_CTX* ctx = OPENSSL_zalloc(sizeof(*ctx));
-    printf("entering hsm_sm3_newctx with ctx: %p\n", ctx);
+    if (ctx == NULL) return NULL;
+
     return ctx;
 }
 
@@ -96,18 +94,18 @@ static int hsm_sm3_internal_init(void* vctx, ossl_unused const OSSL_PARAM params
 
     if (!ossl_prov_is_running()) return 0;
     if (!load_sdf_functions()) return 0;
-
+    //SM3_Init(ctx);
     // 检查硬件是否已打开。如果已打开，则仅重新初始化哈希。
     if (ctx->hSession != NULL) {
         return pfn_SDF_HashInit(ctx->hSession, SGD_SM3, NULL, NULL, 0) == SR_SUCCESSFULLY;
     }
 
     // 如果未打开，则初始化硬件。
-    if (pfn_SDF_OpenDevice(&ctx->hDevice) != SR_SUCCESSFULLY) {
+    if (pfn_SDF_OpenDevice(&hDevice) != SR_SUCCESSFULLY) {
         return 0;
     }
-    if (pfn_SDF_OpenSession(ctx->hDevice, &ctx->hSession) != SR_SUCCESSFULLY) {
-        pfn_SDF_CloseDevice(ctx->hDevice);
+    if (pfn_SDF_OpenSession(hDevice, &ctx->hSession) != SR_SUCCESSFULLY) {
+        pfn_SDF_CloseDevice(hDevice);
         return 0;
     }
     return pfn_SDF_HashInit(ctx->hSession, SGD_SM3, NULL, NULL, 0) == SR_SUCCESSFULLY;
@@ -117,8 +115,11 @@ static int hsm_sm3_internal_init(void* vctx, ossl_unused const OSSL_PARAM params
 static int hsm_sm3_update(void* vctx, const void* data, size_t len) {
     HSM_SM3_DIGEST_CTX* ctx = (HSM_SM3_DIGEST_CTX*)vctx;
     if (!ossl_prov_is_running()) return 0;
+	printf("ctx: %p, data: %p, len: %zu\n", ctx, data, len);
+    printf("entering hsm_sm3_update with data length: %zu\n", len);
+	printf("hSession: %p\n", ctx->hSession);
     int ret = pfn_SDF_HashUpdate(ctx->hSession, (unsigned char*)data, len);
-    printf("entering SM3_Update with data length: %zu\n", len);
+    
     return ret == SR_SUCCESSFULLY;
 }
 
@@ -128,33 +129,53 @@ static int hsm_sm3_internal_final(void* vctx, unsigned char* out, size_t* outl, 
     if (!ossl_prov_is_running()) return 0;
     unsigned int hash_len;
     int ret = pfn_SDF_HashFinal(ctx->hSession, out, &hash_len);
+
     if (ret != SR_SUCCESSFULLY) return 0;
     *outl = hash_len;
+
     printf("entering hsm_sm3_internal_final with outsz: %zu\n", outsz);
     return 1;
 }
 
-/* freectx - 释放上下文并释放硬件资源。 */
 static void hsm_sm3_freectx(void* vctx) {
     HSM_SM3_DIGEST_CTX* ctx = (HSM_SM3_DIGEST_CTX*)vctx;
-    if (ctx != NULL) {
-        if (ctx->hSession != NULL) pfn_SDF_CloseSession(ctx->hSession);
-        if (ctx->hDevice != NULL) pfn_SDF_CloseDevice(ctx->hDevice);
-        OPENSSL_clear_free(ctx, sizeof(*ctx));
+    if (ctx == NULL) return;
+
+    printf("Releasing hardware resources for ctx: %p\n", vctx);
+    if (ctx->hSession != NULL) {
+        pfn_SDF_CloseSession(ctx->hSession);
     }
-    unload_sdf_functions();
+    // 最后，释放上下文本身的内存
+    OPENSSL_clear_free(ctx, sizeof(*ctx));
     printf("entering hsm_sm3_freectx with ctx: %p\n", vctx);
 }
 
 /* dupctx - 复制上下文。 */
 static void* hsm_sm3_dupctx(void* ctx) {
     HSM_SM3_DIGEST_CTX* in = (HSM_SM3_DIGEST_CTX*)ctx;
-    HSM_SM3_DIGEST_CTX* ret = ossl_prov_is_running() ? OPENSSL_malloc(sizeof(*ret)) : NULL;
-    if (ret != NULL) *ret = *in;
-    printf("entering hsm_sm3_dupctx with ctx: %p\n", ctx);
+    HSM_SM3_DIGEST_CTX* ret = NULL;
+
+    ret = OPENSSL_zalloc(sizeof(*in));
+    if (ret == NULL) return NULL;
+
+    // 复制所有数据，包括指向 refs 的指针
+    memcpy(ret, in, sizeof(*in));
+    if (pfn_SDF_OpenSession(hDevice, &ret->hSession) != SR_SUCCESSFULLY) {
+		printf("Failed to open session for duplication\n");
+        pfn_SDF_CloseDevice(hDevice);
+        return 0;
+    }
+    if (pfn_SDF_HashInit(ret->hSession, SGD_SM3, NULL, NULL, 0) != SR_SUCCESSFULLY)
+    {
+        printf("Failed to initialize hash in duplicated context\n");
+        pfn_SDF_CloseSession(ret->hSession);
+        pfn_SDF_CloseDevice(hDevice);
+        OPENSSL_free(ret);
+		return NULL;
+    }
+    printf("entry hsm_sm3_dupctx session:%p\n", ret->hSession);
     return ret;
 }
-
 /* get_params - 检索算法参数。 */
 static int hsm_sm3_get_params(OSSL_PARAM params[]) {
     printf("entering hsm_sm3_get_params\n");

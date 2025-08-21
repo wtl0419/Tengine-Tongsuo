@@ -212,13 +212,6 @@ int ossl_sushu_hsm_provider_init(const OSSL_CORE_HANDLE* handle,
     ossl_prov_ctx_set0_handle(*provctx, handle);
     ossl_prov_ctx_set0_libctx(*provctx, (OSSL_LIB_CTX*)c_get_libctx(handle));
 
-    // 4. 初始化硬件 (如果需要)
-    // pcie_ctx->pcie_device_handle = pcie_init_device(); // 假设的硬件初始化函数
-    // if (pcie_ctx->pcie_device_handle == NULL) {
-    //     // ... 错误处理
-    //     pcie_teardown(*provctx);
-    //     return 0;
-    // }
 
     *out = sushu_hsm_provider_dispatch_table; // 返回Provider的核心功能分发表
     ossl_prov_cache_exported_algorithms(sushu_hsm_cipher_functions, sushu_hsm_exported_ciphers);

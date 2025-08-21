@@ -40,20 +40,18 @@ $LIBCOMMON=libcommon.a
 $LIBFIPS=libfips.a
 $LIBLEGACY=liblegacy.a
 $LIBDEFAULT=libdefault.a
-$LIBHSM=libpiico_cc.a
 LIBS{noinst}=$LIBDEFAULT $LIBCOMMON
 
 # Enough of our implementations include prov/ciphercommon.h (present in
 # providers/implementations/include), which includes crypto/*_platform.h
 # (present in include), which in turn may include very internal header
 # files in crypto/, so let's have a common include list for them all.
-$COMMON_INCLUDES=../crypto ../include implementations/include common/include ../include/provider
+$COMMON_INCLUDES=../crypto ../include implementations/include common/include
 
 INCLUDE[$LIBCOMMON]=$COMMON_INCLUDES
 INCLUDE[$LIBFIPS]=.. $COMMON_INCLUDES
 INCLUDE[$LIBLEGACY]=.. $COMMON_INCLUDES
 INCLUDE[$LIBDEFAULT]=.. $COMMON_INCLUDES
-INCLUDE[$LIBHSM]=.. $COMMON_INCLUDES
 DEFINE[$LIBFIPS]=FIPS_MODULE
 
 # Weak dependencies to provide library order information.  What is actually
@@ -84,7 +82,7 @@ INCLUDE[$DEFAULTGOAL]=implementations/include
 # sushu hsm provider stuff
 #
 $DEFAULTGOAL=../libcrypto
-SOURCE[$DEFAULTGOAL]=$LIBDEFAULT $LIBHSM sushu_hsm.c
+SOURCE[$DEFAULTGOAL]=$LIBDEFAULT sushu_hsm.c
 INCLUDE[$DEFAULTGOAL]=implementations/include
 
 #
